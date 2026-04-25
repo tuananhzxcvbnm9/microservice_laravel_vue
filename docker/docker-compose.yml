@@ -1,0 +1,102 @@
+version: "3.9"
+
+services:
+  gateway:
+    image: nginx:1.27-alpine
+    container_name: gateway
+    ports:
+      - "8080:80"
+    volumes:
+      - ../gateway/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - auth-service
+      - order-service
+      - frontend
+
+  auth-service:
+    build:
+      context: ../services/auth-service
+      dockerfile: Dockerfile
+    env_file:
+      - ../services/auth-service/.env.example
+    depends_on:
+      - auth-db
+      - redis
+
+  order-service:
+    build:
+      context: ../services/order-service
+      dockerfile: Dockerfile
+    env_file:
+      - ../services/order-service/.env.example
+    depends_on:
+      - order-db
+      - redis
+      - rabbitmq
+
+  auth-worker:
+    build:
+      context: ../services/auth-service
+      dockerfile: Dockerfile
+    command: ["php", "artisan", "queue:work", "--tries=3", "--backoff=10"]
+    env_file:
+      - ../services/auth-service/.env.example
+    depends_on:
+      - auth-service
+      - redis
+
+  order-worker:
+    build:
+      context: ../services/order-service
+      dockerfile: Dockerfile
+    command: ["php", "artisan", "queue:work", "--tries=5", "--backoff=10,30,120"]
+    env_file:
+      - ../services/order-service/.env.example
+    depends_on:
+      - order-service
+      - redis
+
+  order-scheduler:
+    build:
+      context: ../services/order-service
+      dockerfile: Dockerfile
+    command: ["php", "artisan", "schedule:work"]
+    env_file:
+      - ../services/order-service/.env.example
+    depends_on:
+      - order-service
+
+  frontend:
+    build:
+      context: ../frontend/admin-web
+      dockerfile: Dockerfile
+    env_file:
+      - ../frontend/admin-web/.env.example
+    ports:
+      - "5173:5173"
+
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    container_name: rabbitmq
+    ports:
+      - "15672:15672"
+
+  auth-db:
+    image: postgres:16-alpine
+    container_name: auth-db
+    environment:
+      POSTGRES_DB: auth_db
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: secret
+
+  order-db:
+    image: postgres:16-alpine
+    container_name: order-db
+    environment:
+      POSTGRES_DB: order_db
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: secret
